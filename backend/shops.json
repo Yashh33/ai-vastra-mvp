@@ -1,0 +1,4 @@
+[
+  { "shop_id": "rt001", "shop_code": "RT001", "pin": "4827", "shop_name": "Retro Tailors" },
+  { "shop_id": "demo002", "shop_code": "DEMO02", "pin": "1234", "shop_name": "Demo Shop 2" }
+]
