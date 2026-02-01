@@ -8,9 +8,11 @@ export default function RootLayout() {
       <Stack.Screen name="home" />
       <Stack.Screen name="history" />
       <Stack.Screen name="heroes" />
-      {/* Visualize + Output viewer will come later */}
-      {/* <Stack.Screen name="visualize" /> */}
-      {/* <Stack.Screen name="output" /> */}
+
+      {/* ✅ New screens for Visualize flow */}
+      <Stack.Screen name="visualize" />
+      <Stack.Screen name="output" />
+      <Stack.Screen name="heroes-pick" />
     </Stack>
   );
 }

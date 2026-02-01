@@ -37,10 +37,7 @@ export default function Home() {
         </Pressable>
       </View>
 
-      <Pressable
-        style={styles.tile}
-        onPress={() => Alert.alert("Next", "Visualize screen comes next (1.1).")}
-      >
+      <Pressable style={styles.tile} onPress={() => router.push("/visualize" as Href)}>
         <Text style={styles.tileTitle}>Visualize</Text>
         <Text style={styles.tileSub}>Create a new outfit visualization</Text>
       </Pressable>

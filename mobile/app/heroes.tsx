@@ -1,5 +1,5 @@
 // app/heroes.tsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -7,10 +7,11 @@ import {
   StyleSheet,
   Alert,
   Image,
-  ScrollView,
   ActivityIndicator,
   Modal,
   SafeAreaView,
+  FlatList,
+  useWindowDimensions,
 } from "react-native";
 import { router } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
@@ -30,6 +31,17 @@ export default function HeroesScreen() {
   // viewer
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerUri, setViewerUri] = useState<string | null>(null);
+
+  const { width } = useWindowDimensions();
+
+  const numCols = 3;
+  const GAP = 10;
+  const PADDING = 16;
+
+  const tileSize = useMemo(() => {
+    const usable = width - PADDING * 2 - GAP * (numCols - 1);
+    return Math.floor(usable / numCols);
+  }, [width]);
 
   useEffect(() => {
     refresh();
@@ -94,6 +106,51 @@ export default function HeroesScreen() {
     setTimeout(() => setViewerUri(null), 150);
   }
 
+  function renderHeader() {
+    return (
+      <View style={styles.headerWrap}>
+        <View style={styles.headerRow}>
+          <Pressable onPress={() => router.back()} style={styles.headerBtnPad}>
+            <Text style={styles.back}>← Back</Text>
+          </Pressable>
+
+          <View style={{ flexDirection: "row", gap: 14, alignItems: "center" }}>
+            <Pressable onPress={refresh} style={styles.headerBtnPad}>
+              <Text style={styles.refresh}>Refresh</Text>
+            </Pressable>
+            <Pressable onPress={pickAndUpload} style={styles.headerBtnPad}>
+              <Text style={styles.add}>+ Add</Text>
+            </Pressable>
+          </View>
+        </View>
+
+        <Text style={styles.title}>Hero Image Collection</Text>
+        <Text style={styles.sub}>Upload hero images once, reuse them in Visualize.</Text>
+
+        {loading ? (
+          <View style={{ marginTop: 10, marginBottom: 6 }}>
+            <ActivityIndicator />
+          </View>
+        ) : null}
+      </View>
+    );
+  }
+
+  function renderItem({ item }: { item: HeroItem }) {
+    const filename = item.key.split("/").slice(-1)[0];
+
+    return (
+      <View style={[styles.tileWrap, { width: tileSize, marginBottom: GAP }]}>
+        <Pressable onPress={() => openViewer(item.url)} style={[styles.tile, { width: tileSize, height: tileSize }]}>
+          <Image source={{ uri: item.url }} style={styles.tileImage} resizeMode="cover" />
+        </Pressable>
+        <Text style={styles.fileName} numberOfLines={1}>
+          {filename}
+        </Text>
+      </View>
+    );
+  }
+
   return (
     <>
       <Modal visible={viewerOpen} animationType="fade" transparent={false} onRequestClose={closeViewer}>
@@ -113,49 +170,41 @@ export default function HeroesScreen() {
         </SafeAreaView>
       </Modal>
 
-      <ScrollView contentContainerStyle={styles.container}>
-        <View style={styles.headerRow}>
-          <Pressable onPress={() => router.back()}>
-            <Text style={styles.back}>← Back</Text>
-          </Pressable>
-
-          <View style={{ flexDirection: "row", gap: 14 }}>
-            <Pressable onPress={refresh}>
-              <Text style={styles.refresh}>Refresh</Text>
-            </Pressable>
-            <Pressable onPress={pickAndUpload}>
-              <Text style={styles.add}>+ Add</Text>
-            </Pressable>
-          </View>
-        </View>
-
-        <Text style={styles.title}>Hero Image Collection</Text>
-        <Text style={styles.sub}>Upload hero images once, reuse them in Visualize.</Text>
-
-        {loading ? (
-          <View style={{ marginTop: 16 }}>
-            <ActivityIndicator />
-          </View>
-        ) : heroes.length === 0 ? (
-          <Text style={styles.muted}>No hero images yet. Tap “+ Add”.</Text>
-        ) : (
-          heroes.map((h) => (
-            <View key={h.key} style={styles.card}>
-              <Pressable onPress={() => openViewer(h.url)}>
-                <Image source={{ uri: h.url }} style={styles.preview} />
-              </Pressable>
-              <Text style={styles.mutedSmall}>{h.key.split("/").slice(-1)[0]}</Text>
-            </View>
-          ))
-        )}
-      </ScrollView>
+      <SafeAreaView style={styles.safe}>
+        <FlatList
+          data={heroes}
+          keyExtractor={(item) => item.key}
+          numColumns={numCols}
+          contentContainerStyle={styles.listContainer}
+          columnWrapperStyle={{ gap: GAP }}
+          ListHeaderComponent={renderHeader}
+          ListEmptyComponent={
+            loading ? null : <Text style={styles.muted}>No hero images yet. Tap “+ Add”.</Text>
+          }
+          renderItem={renderItem}
+        />
+      </SafeAreaView>
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 16, paddingBottom: 40 },
-  headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  safe: { flex: 1, backgroundColor: "#f6f6f6" },
+
+  listContainer: { padding: 16, paddingBottom: 40 },
+
+  headerWrap: { paddingBottom: 8 },
+
+  headerRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingTop: 6,
+    paddingBottom: 6,
+  },
+
+  headerBtnPad: { paddingVertical: 6, paddingHorizontal: 6 },
+
   back: { fontWeight: "900" },
   refresh: { fontWeight: "900", color: "#0a7" },
   add: { fontWeight: "900", color: "#111" },
@@ -163,11 +212,20 @@ const styles = StyleSheet.create({
   title: { fontSize: 22, fontWeight: "900", marginTop: 12 },
   sub: { marginTop: 4, opacity: 0.7, marginBottom: 12 },
 
-  card: { backgroundColor: "white", borderRadius: 14, padding: 14, marginTop: 12, borderWidth: 1, borderColor: "#eee" },
-  preview: { width: "100%", height: 320, borderRadius: 12, backgroundColor: "#f3f3f3" },
-
   muted: { opacity: 0.6, marginTop: 12 },
-  mutedSmall: { opacity: 0.6, fontSize: 12, marginTop: 10 },
+
+  tileWrap: {
+    flexGrow: 0,
+  },
+  tile: {
+    borderRadius: 14,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#eee",
+    overflow: "hidden",
+  },
+  tileImage: { width: "100%", height: "100%" },
+  fileName: { marginTop: 6, fontSize: 11, opacity: 0.6 },
 
   viewerWrap: { flex: 1, backgroundColor: "#000" },
   viewerHeader: { padding: 12, alignItems: "flex-end" },
