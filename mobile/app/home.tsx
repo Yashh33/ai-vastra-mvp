@@ -1,10 +1,20 @@
-import React, { useEffect, useState } from "react";
-import { View, Text, Pressable, StyleSheet, Alert, Image, ScrollView, ActivityIndicator } from "react-native";
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  View,
+  Text,
+  Pressable,
+  StyleSheet,
+  Alert,
+  Image,
+  ScrollView,
+  ActivityIndicator,
+  Modal,
+  SafeAreaView,
+} from "react-native";
 import { router } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
-import { clearSession, me, uploadImage, generateDummy, getHistory } from "../lib/api";
+import { clearSession, me, uploadImage, generateReal, getHistory } from "../lib/api";
 import * as ImageManipulator from "expo-image-manipulator";
-
 
 type HistRecord = {
   job_id: string;
@@ -14,13 +24,20 @@ type HistRecord = {
 
 export default function Home() {
   const [shopId, setShopId] = useState<string>("");
+
   const [fabricUri, setFabricUri] = useState<string | null>(null);
   const [heroUri, setHeroUri] = useState<string | null>(null);
+
   const [outputUrl, setOutputUrl] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(false);
+
   const [history, setHistory] = useState<HistRecord[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+
+  // ✅ Full screen viewer state
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerUri, setViewerUri] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -40,58 +57,51 @@ export default function Home() {
     try {
       const h = await getHistory();
       setHistory(h.records || []);
-    } catch (e: any) {
-      // ignore silently for now
+    } catch {
+      // ignore
     } finally {
       setHistoryLoading(false);
     }
   }
-  
+
   async function convertToJpg(uri: string) {
-  const result = await ImageManipulator.manipulateAsync(
-    uri,
-    [], // no resize for now
-    { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG }
-  );
-  return result.uri; // JPEG URI
-}
-
-  // async function pickImage(setter: (v: string) => void) {
-  //   const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-  //   if (!perm.granted) {
-  //     Alert.alert("Permission needed", "Please allow photo access.");
-  //     return;
-  //   }
-
-  //   const res = await ImagePicker.launchImageLibraryAsync({
-  //     mediaTypes: ImagePicker.MediaTypeOptions.Images,
-  //     quality: 0.8,
-  //   });
-
-  //   if (!res.canceled) {
-  //     setter(res.assets[0].uri);
-  //   }
-  // }
+    const result = await ImageManipulator.manipulateAsync(
+      uri,
+      [], // no resize for now
+      { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG }
+    );
+    return result.uri;
+  }
 
   async function pickImage(setter: (v: string) => void) {
-  const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-  if (!perm.granted) {
-    Alert.alert("Permission needed", "Please allow photo access.");
-    return;
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert("Permission needed", "Please allow photo access.");
+      return;
+    }
+
+    const res = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 1,
+    });
+
+    if (!res.canceled) {
+      const originalUri = res.assets[0].uri;
+      const jpgUri = await convertToJpg(originalUri);
+      setter(jpgUri);
+    }
   }
 
-  const res = await ImagePicker.launchImageLibraryAsync({
-    mediaTypes: ImagePicker.MediaTypeOptions.Images,
-    quality: 1, // pick best; we will compress ourselves
-  });
-
-  if (!res.canceled) {
-    const originalUri = res.assets[0].uri;
-    const jpgUri = await convertToJpg(originalUri);
-    setter(jpgUri);
+  function openViewer(uri: string) {
+    setViewerUri(uri);
+    setViewerOpen(true);
   }
-}
 
+  function closeViewer() {
+    setViewerOpen(false);
+    // keep uri for a moment to avoid flicker on close animation
+    setTimeout(() => setViewerUri(null), 150);
+  }
 
   async function onGenerate() {
     if (!fabricUri || !heroUri) {
@@ -107,8 +117,15 @@ export default function Home() {
       const upFabric = await uploadImage(fabricUri, "fabric");
       // 2) upload hero
       const upHero = await uploadImage(heroUri, "hero");
-      // 3) generate dummy
-      const gen = await generateDummy(upFabric.key, upHero.key);
+      // 3) User Prompt
+      const prompt =
+      "Create a photorealistic image of the HERO garment made from the FABRIC cloth. " +
+      "Keep the HERO person, pose, face, hair, skin tone, lighting, shadows, and background unchanged. " +
+      "Only the garment fabric should change. Preserve seams, stitching, folds, wrinkles, and natural shading. " +
+      "Make it look like real tailored clothing, not a pasted texture or Photoshop overlay.";
+      // 4) generate dummy
+      const gen = await generateReal(upFabric.key, upHero.key, prompt);
+
 
       setOutputUrl(gen.output_url);
       await refreshHistory();
@@ -126,72 +143,117 @@ export default function Home() {
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <View style={styles.headerRow}>
-        <View>
-          <Text style={styles.title}>AI Vastra</Text>
-          <Text style={styles.sub}>Shop: {shopId || "..."}</Text>
-        </View>
-        <Pressable style={styles.logoutBtn} onPress={logout}>
-          <Text style={styles.logoutText}>Logout</Text>
-        </Pressable>
-      </View>
+    <>
+      {/* ✅ Full-screen image modal */}
+      <Modal visible={viewerOpen} animationType="fade" transparent={false} onRequestClose={closeViewer}>
+        <SafeAreaView style={styles.viewerWrap}>
+          <View style={styles.viewerHeader}>
+            <Pressable style={styles.viewerCloseBtn} onPress={closeViewer}>
+              <Text style={styles.viewerCloseText}>Close</Text>
+            </Pressable>
+          </View>
 
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>1) Select Fabric Image</Text>
-        {fabricUri ? <Image source={{ uri: fabricUri }} style={styles.preview} /> : <Text style={styles.muted}>No fabric selected</Text>}
-        <Pressable style={styles.btn} onPress={() => pickImage((u) => setFabricUri(u))}>
-          <Text style={styles.btnText}>Pick Fabric</Text>
-        </Pressable>
-      </View>
+          <View style={styles.viewerBody}>
+            {viewerUri ? (
+              <Image
+                source={{ uri: viewerUri }}
+                style={styles.viewerImage}
+                resizeMode="contain"
+              />
+            ) : (
+              <ActivityIndicator />
+            )}
+          </View>
+        </SafeAreaView>
+      </Modal>
 
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>2) Select Hero Image</Text>
-        {heroUri ? <Image source={{ uri: heroUri }} style={styles.preview} /> : <Text style={styles.muted}>No hero selected</Text>}
-        <Pressable style={styles.btn} onPress={() => pickImage((u) => setHeroUri(u))}>
-          <Text style={styles.btnText}>Pick Hero</Text>
-        </Pressable>
-      </View>
-
-      <Pressable style={[styles.generateBtn, loading && { opacity: 0.6 }]} onPress={onGenerate} disabled={loading}>
-        {loading ? <ActivityIndicator /> : <Text style={styles.generateText}>Generate (Dummy)</Text>}
-      </Pressable>
-
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Output</Text>
-        {outputUrl ? (
-          <Image source={{ uri: outputUrl }} style={styles.output} />
-        ) : (
-          <Text style={styles.muted}>No output yet</Text>
-        )}
-      </View>
-
-      <View style={styles.card}>
-        <View style={styles.historyRow}>
-          <Text style={styles.sectionTitle}>History</Text>
-          <Pressable onPress={refreshHistory}>
-            <Text style={styles.link}>Refresh</Text>
+      <ScrollView contentContainerStyle={styles.container}>
+        <View style={styles.headerRow}>
+          <View>
+            <Text style={styles.title}>AI Vastra</Text>
+            <Text style={styles.sub}>Shop: {shopId || "..."}</Text>
+          </View>
+          <Pressable style={styles.logoutBtn} onPress={logout}>
+            <Text style={styles.logoutText}>Logout</Text>
           </Pressable>
         </View>
 
-        {historyLoading ? (
-          <Text style={styles.muted}>Loading…</Text>
-        ) : history.length === 0 ? (
-          <Text style={styles.muted}>No history yet</Text>
-        ) : (
-          history.map((h) => (
-            <View key={h.job_id} style={styles.historyItem}>
-              <Text style={styles.historyJob}>Job: {h.job_id.slice(0, 8)}…</Text>
-              <Text style={styles.mutedSmall}>{h.created_at}</Text>
-            </View>
-          ))
-        )}
-      </View>
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>1) Select Fabric Image</Text>
+          {fabricUri ? (
+            <Pressable onPress={() => openViewer(fabricUri)}>
+              <Image source={{ uri: fabricUri }} style={styles.preview} />
+            </Pressable>
+          ) : (
+            <Text style={styles.muted}>No fabric selected</Text>
+          )}
+          <Pressable style={styles.btn} onPress={() => pickImage((u) => setFabricUri(u))}>
+            <Text style={styles.btnText}>Pick Fabric</Text>
+          </Pressable>
+        </View>
 
-      <Text style={styles.footerHint}>
-        Note: Output URL is signed and expires in ~1 hour. History is stored in R2.
-      </Text>
-    </ScrollView>
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>2) Select Hero Image</Text>
+          {heroUri ? (
+            <Pressable onPress={() => openViewer(heroUri)}>
+              <Image source={{ uri: heroUri }} style={styles.preview} />
+            </Pressable>
+          ) : (
+            <Text style={styles.muted}>No hero selected</Text>
+          )}
+          <Pressable style={styles.btn} onPress={() => pickImage((u) => setHeroUri(u))}>
+            <Text style={styles.btnText}>Pick Hero</Text>
+          </Pressable>
+        </View>
+
+        <Pressable
+          style={[styles.generateBtn, loading && { opacity: 0.6 }]}
+          onPress={onGenerate}
+          disabled={loading}
+        >
+          {loading ? <ActivityIndicator /> : <Text style={styles.generateText}>Generate</Text>}
+        </Pressable>
+
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Output</Text>
+
+          {outputUrl ? (
+            <Pressable onPress={() => openViewer(outputUrl)}>
+              <Image source={{ uri: outputUrl }} style={styles.output} />
+              <Text style={styles.tapHint}>Tap image to view full screen</Text>
+            </Pressable>
+          ) : (
+            <Text style={styles.muted}>No output yet</Text>
+          )}
+        </View>
+
+        <View style={styles.card}>
+          <View style={styles.historyRow}>
+            <Text style={styles.sectionTitle}>History</Text>
+            <Pressable onPress={refreshHistory}>
+              <Text style={styles.link}>Refresh</Text>
+            </Pressable>
+          </View>
+
+          {historyLoading ? (
+            <Text style={styles.muted}>Loading…</Text>
+          ) : history.length === 0 ? (
+            <Text style={styles.muted}>No history yet</Text>
+          ) : (
+            history.map((h) => (
+              <View key={h.job_id} style={styles.historyItem}>
+                <Text style={styles.historyJob}>Job: {h.job_id.slice(0, 8)}…</Text>
+                <Text style={styles.mutedSmall}>{h.created_at}</Text>
+              </View>
+            ))
+          )}
+        </View>
+
+        <Text style={styles.footerHint}>
+          Note: Output URL is signed and expires in ~1 hour. History is stored in R2.
+        </Text>
+      </ScrollView>
+    </>
   );
 }
 
@@ -224,4 +286,18 @@ const styles = StyleSheet.create({
   historyJob: { fontWeight: "800" },
 
   footerHint: { marginTop: 14, opacity: 0.6, fontSize: 12, textAlign: "center" },
+
+  tapHint: { marginTop: 8, opacity: 0.6, fontSize: 12 },
+
+  // ✅ Full screen viewer styles
+  viewerWrap: { flex: 1, backgroundColor: "#000" },
+  viewerHeader: { padding: 12, alignItems: "flex-end" },
+  viewerCloseBtn: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, backgroundColor: "#222" },
+  viewerCloseText: { color: "white", fontWeight: "800" },
+  viewerBody: { flex: 1, justifyContent: "center", alignItems: "center" },
+  viewerImage: { width: "100%", height: "100%" },
 });
+
+
+
+

@@ -64,7 +64,7 @@ export async function uploadImage(uri: string, kind: string) {
   const form = new FormData();
   form.append("file", {
     uri,
-    name: `upload.${uri.split(".").pop() || "jpg"}`,
+    name: "upload.jpg",
     type: "image/jpeg",
   } as any);
 
@@ -103,6 +103,30 @@ export async function generateDummy(fabric_key: string, hero_key: string) {
   }
 
   return res.json(); // {job_id, output_key, output_url, history_key}
+}
+
+export async function generateReal(fabric_key: string, hero_key: string, prompt?: string) {
+  const token = await getShopTokenOrThrow();
+
+  const res = await fetch(`${API_BASE_URL}/generate`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Shop-Token": token,
+    },
+    body: JSON.stringify({
+      fabric_key,
+      hero_key,
+      ...(prompt ? { prompt } : {}),
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `Generate failed (${res.status})`);
+  }
+
+  return res.json(); // {job_id, output_key, output_url, history_key, output_mime?}
 }
 
 export async function getHistory() {
