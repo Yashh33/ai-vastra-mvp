@@ -143,3 +143,18 @@ export async function getHistory() {
 
   return res.json(); // {count, records}
 }
+
+export async function getHeroes() {
+  const token = await getShopTokenOrThrow();
+
+  const res = await fetch(`${API_BASE_URL}/heroes?limit=50`, {
+    headers: { "X-Shop-Token": token },
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `Heroes failed (${res.status})`);
+  }
+
+  return res.json(); // expect: { count, items: [{key,url,last_modified?}] }
+}

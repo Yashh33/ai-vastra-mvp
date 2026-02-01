@@ -356,36 +356,112 @@ def generate_real(
 # ---------------------------
 # History list
 # ---------------------------
+# @app.get("/history")
+# def history(
+#     limit: int = 20,
+#     x_shop_token: Optional[str] = Header(default=None, alias="X-Shop-Token"),
+# ):
+#     shop_id = require_shop(x_shop_token)
+#     prefix = f"shops/{shop_id}/history/"
+
+#     resp = s3.list_objects_v2(Bucket=R2_BUCKET, Prefix=prefix)
+#     items = resp.get("Contents", [])
+
+#     # sort newest first by LastModified
+#     items.sort(key=lambda x: x["LastModified"], reverse=True)
+#     items = items[: max(1, min(limit, 50))]
+
+#     # fetch json records
+#     records = []
+#     for it in items:
+#         key = it["Key"]
+#         obj = s3.get_object(Bucket=R2_BUCKET, Key=key)
+#         data = obj["Body"].read()
+#         try:
+#             records.append(json.loads(data))
+#         except Exception:
+#             continue
+
+#     return {"count": len(records), "records": records}
+
+
+# ---------------------------
+# History list (outputs only)
+# ---------------------------
 @app.get("/history")
 def history(
     limit: int = 20,
     x_shop_token: Optional[str] = Header(default=None, alias="X-Shop-Token"),
 ):
     shop_id = require_shop(x_shop_token)
+
+    # We only want generation history records that contain output_key
     prefix = f"shops/{shop_id}/history/"
 
     resp = s3.list_objects_v2(Bucket=R2_BUCKET, Prefix=prefix)
     items = resp.get("Contents", [])
 
-    # sort newest first by LastModified
+    # newest first
     items.sort(key=lambda x: x["LastModified"], reverse=True)
     items = items[: max(1, min(limit, 50))]
 
-    # fetch json records
     records = []
     for it in items:
         key = it["Key"]
         obj = s3.get_object(Bucket=R2_BUCKET, Key=key)
         data = obj["Body"].read()
+
         try:
-            records.append(json.loads(data))
+            rec = json.loads(data)
         except Exception:
             continue
 
+        # safety: only include records that have output_key
+        out_key = rec.get("output_key")
+        if not out_key:
+            continue
+
+        # attach a fresh signed URL for the output image
+        rec["output_url"] = r2_presign_get_url(out_key, expires_seconds=3600)
+
+        records.append(rec)
+
     return {"count": len(records), "records": records}
 
+# ---------------------------
+# Hero Image Collection list
+# ---------------------------
+@app.get("/heroes")
+def heroes(
+    limit: int = 50,
+    x_shop_token: Optional[str] = Header(default=None, alias="X-Shop-Token"),
+):
+    shop_id = require_shop(x_shop_token)
 
+    prefix = f"shops/{shop_id}/heroes/"
 
+    resp = s3.list_objects_v2(Bucket=R2_BUCKET, Prefix=prefix)
+    items = resp.get("Contents", [])
+
+    # newest first
+    items.sort(key=lambda x: x["LastModified"], reverse=True)
+    items = items[: max(1, min(limit, 100))]
+
+    out = []
+    for it in items:
+        k = it["Key"]
+        # skip "folder keys" if any
+        if k.endswith("/"):
+            continue
+
+        out.append({
+            "key": k,
+            "created_at": it["LastModified"].isoformat(),
+            "size_bytes": it.get("Size", 0),
+            "url": r2_presign_get_url(k, expires_seconds=3600),
+        })
+
+    return {"count": len(out), "items": out}
 
 
 
