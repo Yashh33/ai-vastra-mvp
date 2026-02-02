@@ -11,10 +11,13 @@ import {
   SafeAreaView,
 } from "react-native";
 import { router, useLocalSearchParams,type Href } from "expo-router";
-import * as FileSystem from "expo-file-system";
+// import * as FileSystem from "expo-file-system";
 // import * as FileSystem from "expo-file-system/FileSystem";
 // import * as FileSystem from "expo-file-system/build/FileSystem";
+import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
+import * as MediaLibrary from "expo-media-library";
+
 
 export default function OutputScreen() {
   const params = useLocalSearchParams<{
@@ -28,6 +31,28 @@ export default function OutputScreen() {
 
   const [downloading, setDownloading] = useState(false);
 
+const FS: any = FileSystem;
+
+  async function saveImageToGallery(imageUrl: string, filename: string) {
+    // 1) Ask permission
+    const perm = await MediaLibrary.requestPermissionsAsync();
+    if (!perm.granted) {
+      throw new Error("Photo permission not granted");
+    }
+
+    // 2) Download to app storage
+    const baseDir = FS.documentDirectory || FS.cacheDirectory;
+    if (!baseDir) throw new Error("No filesystem directory available");
+
+    const localUri = `${baseDir}${filename}`;
+    const dl = await FS.downloadAsync(imageUrl, localUri);
+
+    // 3) Save to Gallery
+    await MediaLibrary.saveToLibraryAsync(dl.uri);
+
+    return dl.uri;
+  }
+
   async function onDownload() {
     if (!outputUrl) {
       Alert.alert("Missing Output", "No output URL found.");
@@ -37,32 +62,18 @@ export default function OutputScreen() {
     try {
       setDownloading(true);
 
-      const filename = `ai-vastra-${jobId}.jpg`;
-    //   const dest = `${FileSystem.cacheDirectory}${filename}`;
+      const localUri = await saveImageToGallery(
+        outputUrl,
+        `ai-vastra-${jobId || "output"}.jpg`
+      );
 
-      const FS = FileSystem as any;
-
-      const baseDir = FS.documentDirectory || FS.cacheDirectory;
-       if (!baseDir) throw new Error("No filesystem directory available");
-    
-    //   const baseDir = FileSystem.documentDirectory;
-    //   if (!baseDir) throw new Error("No filesystem directory available");
-
-      const dest = `${baseDir}${filename}`;
-
-      const dl = await FileSystem.downloadAsync(outputUrl, dest);
-
-      const canShare = await Sharing.isAvailableAsync();
-      if (canShare) {
-        await Sharing.shareAsync(dl.uri);
-      } else {
-        Alert.alert("Downloaded", `Saved to: ${dl.uri}`);
-      }
+      Alert.alert("Saved ✅", "Image saved to your Gallery/Photos.");
     } catch (e: any) {
-      Alert.alert("Download failed", e?.message || "Could not download");
+      Alert.alert("Save failed", e?.message || "Could not save image");
     } finally {
       setDownloading(false);
     }
+
   }
 
   function onClose() {
