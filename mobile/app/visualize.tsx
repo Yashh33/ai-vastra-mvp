@@ -20,6 +20,7 @@ export default function VisualizeScreen() {
   const params = useLocalSearchParams<{
     hero_key?: string;
     hero_url?: string;
+    fabric_uri?: string;
   }>();
 
   const [fabricUri, setFabricUri] = useState<string | null>(null);
@@ -32,6 +33,7 @@ export default function VisualizeScreen() {
   useMemo(() => {
     if (params.hero_key && params.hero_key !== heroKey) setHeroKey(params.hero_key);
     if (params.hero_url && params.hero_url !== heroUrl) setHeroUrl(params.hero_url);
+    if (params.fabric_uri && !fabricUri) setFabricUri(params.fabric_uri);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.hero_key, params.hero_url]);
 
@@ -94,7 +96,11 @@ export default function VisualizeScreen() {
 
   function openHeroPicker() {
     // Navigate to picker screen
-    router.push("/heroes-pick" as Href);
+    // router.push("/heroes-pick" as Href);
+    router.push({
+    pathname: "/heroes-pick",
+    params: fabricUri ? { fabric_uri: fabricUri } : {},
+  } as unknown as Href);
   }
 
   async function onGenerate() {

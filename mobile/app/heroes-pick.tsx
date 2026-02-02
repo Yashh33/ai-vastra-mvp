@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import { router, type Href } from "expo-router";
 import { getHeroes } from "../lib/api";
+import { useLocalSearchParams } from "expo-router";
 
 type HeroItem = {
   key: string;
@@ -27,6 +28,9 @@ export default function HeroesPickScreen() {
   const [heroes, setHeroes] = useState<HeroItem[]>([]);
   const [selected, setSelected] = useState<HeroItem | null>(null);
 
+  const params = useLocalSearchParams<{ fabric_uri?: string }>();
+  const fabricUri = params.fabric_uri;
+
   const { width } = useWindowDimensions();
   const numCols = 3;
   const GAP = 10;
@@ -35,7 +39,7 @@ export default function HeroesPickScreen() {
   const tileSize = useMemo(() => {
     const usable = width - PADDING * 2 - GAP * (numCols - 1);
     return Math.floor(usable / numCols);
-  }, [width]);
+  }, [width, numCols, GAP, PADDING]);
 
   useEffect(() => {
     refresh();
@@ -53,6 +57,7 @@ export default function HeroesPickScreen() {
     }
   }
 
+
   function onNext() {
     if (!selected) {
       Alert.alert("Select a Hero", "Please tap one hero image to select it.");
@@ -60,10 +65,20 @@ export default function HeroesPickScreen() {
     }
 
     // Replace this picker screen with Visualize screen and pass params
+    // router.replace({
+    //   pathname: "/visualize",
+    //   params: { hero_key: selected.key, hero_url: selected.url },
+    // }as unknown as Href);
+
     router.replace({
       pathname: "/visualize",
-      params: { hero_key: selected.key, hero_url: selected.url },
-    }as unknown as Href);
+      params: {
+        hero_key: selected.key,
+        hero_url: selected.url,
+        ...(fabricUri ? { fabric_uri: fabricUri } : {}),
+      },
+    } as unknown as Href);
+
   }
 
   function renderHeader() {
