@@ -158,3 +158,54 @@ export async function getHeroes() {
 
   return res.json(); // expect: { count, items: [{key,url,last_modified?}] }
 }
+
+export async function analyzeOutputColors(image_key: string, num_colors = 6) {
+  const token = await getShopTokenOrThrow();
+
+  const res = await fetch(`${API_BASE_URL}/analyze-colors`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Shop-Token": token,
+    },
+    body: JSON.stringify({ image_key, num_colors }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `Analyze colors failed (${res.status})`);
+  }
+
+  return res.json() as Promise<{
+    count: number;
+    colors: Array<{ id: string; hex: string; coverage: number; h: number; s: number; l: number }>;
+  }>;
+}
+
+export async function adjustOutputColors(payload: {
+  image_key: string;
+  target_h?: number | null;
+  hue_delta?: number;
+  sat_delta?: number;
+  light_delta?: number;
+  tolerance?: number;
+  feather?: number;
+}) {
+  const token = await getShopTokenOrThrow();
+
+  const res = await fetch(`${API_BASE_URL}/adjust-output-colors`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Shop-Token": token,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `Adjust colors failed (${res.status})`);
+  }
+
+  return res.json() as Promise<{ adjusted_key: string; adjusted_url: string; source_output_key: string }>;
+}
