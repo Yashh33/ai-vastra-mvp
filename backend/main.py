@@ -1,6 +1,8 @@
 import os
 import json
 import uuid
+import io
+import colorsys
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -127,6 +129,102 @@ def r2_presign_get_url(key: str, expires_seconds: int = 3600) -> str:
         Params={"Bucket": R2_BUCKET, "Key": key},
         ExpiresIn=expires_seconds,
     )
+
+
+def _clamp(v: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, v))
+
+
+def _hue_distance(a: float, b: float) -> float:
+    d = abs(a - b) % 360.0
+    return min(d, 360.0 - d)
+
+
+def extract_prominent_colors(image: Image.Image, num_colors: int = 6):
+    sample = image.convert("RGB")
+    sample.thumbnail((512, 512))
+    palette_size = max(2, min(12, num_colors))
+    quantized = sample.quantize(colors=palette_size, method=Image.MEDIANCUT)
+
+    palette = quantized.getpalette() or []
+    counts = quantized.getcolors() or []
+    total = sum(c for c, _ in counts) or 1
+
+    counts.sort(key=lambda x: x[0], reverse=True)
+    out = []
+    for i, (count, idx) in enumerate(counts[:num_colors], start=1):
+        base = idx * 3
+        if base + 2 >= len(palette):
+            continue
+
+        r, g, b = palette[base], palette[base + 1], palette[base + 2]
+        h, l, s = colorsys.rgb_to_hls(r / 255.0, g / 255.0, b / 255.0)
+        out.append({
+            "id": f"c{i}",
+            "hex": f"#{r:02X}{g:02X}{b:02X}",
+            "coverage": round(count / total, 4),
+            "h": round(h * 360.0, 2),
+            "s": round(s, 4),
+            "l": round(l, 4),
+        })
+
+    return out
+
+
+def adjust_image_hsl(
+    image: Image.Image,
+    hue_delta: float,
+    sat_delta: float,
+    light_delta: float,
+    target_hue: Optional[float] = None,
+    tolerance: float = 28.0,
+    feather: float = 12.0,
+):
+    rgb = image.convert("RGB")
+    pixels = list(rgb.getdata())
+    out_pixels = []
+
+    tol = max(0.0, float(tolerance))
+    feather = max(0.0001, float(feather))
+
+    for r, g, b in pixels:
+        h, l, s = colorsys.rgb_to_hls(r / 255.0, g / 255.0, b / 255.0)
+        h_deg = h * 360.0
+
+        if target_hue is None:
+            weight = 1.0
+        else:
+            dist = _hue_distance(h_deg, target_hue)
+            if dist <= tol:
+                weight = 1.0
+            elif dist >= tol + feather:
+                weight = 0.0
+            else:
+                weight = 1.0 - ((dist - tol) / feather)
+
+            if s < 0.08:
+                weight *= s / 0.08
+
+        if weight <= 0.0:
+            out_pixels.append((r, g, b))
+            continue
+
+        new_h = (h_deg + (hue_delta * weight)) % 360.0
+        new_s = _clamp(s * (1.0 + (sat_delta / 100.0) * weight), 0.0, 1.0)
+        new_l = _clamp(l + (light_delta / 100.0) * weight, 0.0, 1.0)
+
+        rr, gg, bb = colorsys.hls_to_rgb(new_h / 360.0, new_l, new_s)
+        out_pixels.append((int(rr * 255), int(gg * 255), int(bb * 255)))
+
+    out = Image.new("RGB", rgb.size)
+    out.putdata(out_pixels)
+    return out
+
+
+def load_r2_image(key: str) -> Image.Image:
+    obj = s3.get_object(Bucket=R2_BUCKET, Key=key)
+    data = obj["Body"].read()
+    return Image.open(io.BytesIO(data)).convert("RGB")
 
 # ---------------------------
 # Upload (fabric/hero)
@@ -463,9 +561,79 @@ def heroes(
 
     return {"count": len(out), "items": out}
 
+@app.post("/analyze-colors")
+def analyze_colors(
+    payload: dict = Body(...),
+    x_shop_token: Optional[str] = Header(default=None, alias="X-Shop-Token"),
+):
+    shop_id = require_shop(x_shop_token)
+    image_key = payload.get("image_key")
+    num_colors = int(payload.get("num_colors") or 6)
+
+    if not image_key:
+        raise HTTPException(status_code=400, detail="image_key required")
+
+    if not image_key.startswith(f"shops/{shop_id}/"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    try:
+        image = load_r2_image(image_key)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Unable to read image: {e}")
+
+    colors = extract_prominent_colors(image, num_colors=max(2, min(10, num_colors)))
+    return {"count": len(colors), "colors": colors}
 
 
+@app.post("/adjust-output-colors")
+def adjust_output_colors(
+    payload: dict = Body(...),
+    x_shop_token: Optional[str] = Header(default=None, alias="X-Shop-Token"),
+):
+    shop_id = require_shop(x_shop_token)
 
+    image_key = payload.get("image_key")
+    if not image_key:
+        raise HTTPException(status_code=400, detail="image_key required")
 
+    if not image_key.startswith(f"shops/{shop_id}/"):
+        raise HTTPException(status_code=403, detail="Forbidden")
 
+    hue_delta = float(payload.get("hue_delta") or 0)
+    sat_delta = float(payload.get("sat_delta") or 0)
+    light_delta = float(payload.get("light_delta") or 0)
+    tolerance = float(payload.get("tolerance") or 28)
+    feather = float(payload.get("feather") or 12)
+
+    target_h = payload.get("target_h")
+    target_h = float(target_h) if target_h is not None else None
+
+    try:
+        image = load_r2_image(image_key)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Unable to read image: {e}")
+
+    adjusted = adjust_image_hsl(
+        image=image,
+        hue_delta=hue_delta,
+        sat_delta=sat_delta,
+        light_delta=light_delta,
+        target_hue=target_h,
+        tolerance=tolerance,
+        feather=feather,
+    )
+
+    buf = io.BytesIO()
+    adjusted.save(buf, format="JPEG", quality=95)
+    out_bytes = buf.getvalue()
+
+    variant_id = uuid.uuid4().hex
+    out_key = f"shops/{shop_id}/output-variants/{datetime.utcnow().strftime('%Y%m%d')}/{variant_id}.jpg"
+    r2_put_bytes(out_key, out_bytes, "image/jpeg")
+
+    return {
+        "adjusted_key": out_key,
+        "adjusted_url": r2_presign_get_url(out_key),
+        "source_output_key": image_key,
+    }
 
