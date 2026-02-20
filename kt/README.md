@@ -10,5 +10,3 @@ This folder contains a handover package for onboarding and knowledge transfer.
 5. `05-ops-runbook.md` — operational troubleshooting
 6. `06-change-guide.md` — safe extension guide
 7. `07-faq-known-issues.md` — FAQ and known limitations
-
-8. `08-photoshop-style-color-adjustment.md` — implementing prominent colors + H/S/L workflow
